@@ -5,8 +5,11 @@ const axios = require('axios');
 const qs = require('qs');
 const crypto = require('crypto');
 
-const app = express();
+const app = express(); 
 const port = process.env.PORT || 3000;
+
+const cors = require('cors');
+app.use(cors()); 
 
 // Environment variables
 const clientId = process.env.CLIENT_ID;
@@ -43,18 +46,17 @@ app.get('/auth/login', (req, res) => {
 
 // Step 2: Handle the redirect and exchange the authorization code for tokens using PKCE
 app.get('/auth/callback', async (req, res) => {
-  const code = req.query.code; // Authorization code received from Microsoft
-  const sessionId = req.query.state; // Retrieve the session identifier to get the correct code_verifier
+  const code = req.query.code;
+  const sessionId = req.query.state;
 
   if (!code || !sessionId || !codeVerifierStore[sessionId]) {
     return res.status(400).send('Authorization code or session identifier not found');
   }
 
-  const codeVerifier = codeVerifierStore[sessionId]; // Retrieve the code_verifier from the temporary store
+  const codeVerifier = codeVerifierStore[sessionId];
 
   const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
-  // Create the data payload for the token request
   const data = qs.stringify({
     client_id: clientId,
     client_secret: clientSecret,
@@ -62,11 +64,10 @@ app.get('/auth/callback', async (req, res) => {
     code: code,
     redirect_uri: redirectUri,
     grant_type: 'authorization_code',
-    code_verifier: codeVerifier, // Include the code verifier for PKCE
+    code_verifier: codeVerifier,
   });
 
   try {
-    // Exchange the authorization code for an access token
     const tokenResponse = await axios.post(tokenUrl, data, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
@@ -74,16 +75,67 @@ app.get('/auth/callback', async (req, res) => {
     const accessToken = tokenResponse.data.access_token;
     const refreshToken = tokenResponse.data.refresh_token;
 
-    // Cleanup the stored code_verifier after successful exchange
+    // Clean up the code_verifier after successful token exchange
     delete codeVerifierStore[sessionId];
 
-    // Send the access and refresh tokens back to the frontend (Vue.js)
-    res.json({ accessToken, refreshToken });
+    // Redirect to the frontend with access token and refresh token in query parameters
+    res.redirect(`http://localhost:8080?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}`);
   } catch (error) {
     console.error('Error exchanging code for tokens:', error.response ? error.response.data : error.message);
     res.status(500).send('Authentication failed');
   }
 });
+
+
+// Endpoint to create appointment
+app.post('/appointments', async (req, res) => {
+  const { accessToken, title, startTime, endTime, description } = req.body;
+
+  if (!accessToken) {
+    return res.status(401).send('Access token is missing');
+  }
+
+  // Event object to send to Microsoft Graph API
+  const event = {
+    subject: title,
+    body: {
+      contentType: 'HTML',
+      content: description || '',
+    },
+    start: {
+      dateTime: new Date(startTime).toISOString(),
+      timeZone: 'UTC',
+    },
+    end: {
+      dateTime: new Date(endTime).toISOString(),
+      timeZone: 'UTC',
+    },
+  };
+
+  try {
+    // Make the request to Microsoft Graph API to create the event
+    const graphResponse = await axios.post(
+      'https://graph.microsoft.com/v1.0/me/events',
+      event,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (graphResponse.status === 201) {
+      res.status(201).send('Appointment created successfully');
+    } else {
+      res.status(graphResponse.status).send(graphResponse.data);
+    }
+  } catch (error) {
+    console.error('Error creating appointment:', error.response ? error.response.data : error.message);
+    res.status(500).send('Failed to create appointment');
+  }
+});
+
 
 // Start the backend server
 app.listen(port, () => {
