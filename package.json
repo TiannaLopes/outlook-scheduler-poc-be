@@ -19,6 +19,7 @@
   "homepage": "https://github.com/TiannaLopes/outlook-scheduler-poc-be#readme",
   "dependencies": {
     "axios": "^1.7.7",
+    "crypto": "^1.0.1",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "qs": "^6.13.0"
